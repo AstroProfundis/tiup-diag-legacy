@@ -51,6 +51,10 @@ export default {
   'menu.instances': '实例管理',
   'menu.inspection': '诊断管理',
   'menu.inspection.instance_list': '集群实例列表',
+
+  'menu.inspection.statement_list': 'Statement',
+  'menu.inspection.statement_detail': 'Statement 详情',
+
   'menu.inspection.report_list': '诊断报告列表',
   'menu.inspection.report_detail': '诊断报告详情',
   'menu.inspection.perf_profile': '火焰图 & Profile',

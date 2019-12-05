@@ -9,6 +9,7 @@ import { InspectionModelState } from './inspection';
 import { MiscModelState } from './misc';
 import { LogModelState } from './log';
 import { EmphasisModelState } from './emphasis';
+import { StatementModelState } from './statement';
 
 export {
   GlobalModelState,
@@ -40,6 +41,7 @@ export interface ConnectState {
   misc: MiscModelState;
   log: LogModelState;
   emphasis: EmphasisModelState;
+  statement: StatementModelState;
 }
 
 export type Effect = (

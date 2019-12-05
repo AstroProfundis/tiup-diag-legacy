@@ -44,6 +44,19 @@ export default [
             path: '/inspection',
             redirect: '/inspection/reports',
           },
+
+          {
+            path: '/inspection/statements',
+            name: 'statement_list',
+            component: './Statement/StatementList',
+          },
+          {
+            path: '/inspection/statements/:id',
+            name: 'statement_detail',
+            component: './Statement/StatementDetail',
+            hideInMenu: true,
+          },
+
           {
             path: '/inspection/reports',
             name: 'report_list',
@@ -67,6 +80,7 @@ export default [
             component: './Inspection/InspectionDetail',
             hideInMenu: true,
           },
+
           {
             path: '/inspection/emphasis',
             name: 'emphasis',
@@ -90,6 +104,7 @@ export default [
             component: './Emphasis/EmphasisDetail',
             hideInMenu: true,
           },
+
           {
             path: '/inspection/perfprofiles',
             name: 'perf_profile',
