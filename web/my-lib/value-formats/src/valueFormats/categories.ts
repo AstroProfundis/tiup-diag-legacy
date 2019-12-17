@@ -23,6 +23,7 @@ import {
   toNanoSeconds,
   toSeconds,
   toTimeTicks,
+  toSecondsSkipWeek,
 } from './dateTimeFormatters';
 import { toHex, sci, toHex0x, toPercent, toPercentUnit } from './arithmeticFormatters';
 import { binarySIPrefix, currency, decimalSIPrefix } from './symbolFormatters';
@@ -333,6 +334,7 @@ export const getCategories = (): ValueFormatCategory[] => [
       { name: 'microseconds (µs)', id: 'µs', fn: toMicroSeconds },
       { name: 'milliseconds (ms)', id: 'ms', fn: toMilliSeconds },
       { name: 'seconds (s)', id: 's', fn: toSeconds },
+      { name: 'seconds (s) - skip week', id: 's-skip-week', fn: toSecondsSkipWeek },
       { name: 'minutes (m)', id: 'm', fn: toMinutes },
       { name: 'hours (h)', id: 'h', fn: toHours },
       { name: 'days (d)', id: 'd', fn: toDays },

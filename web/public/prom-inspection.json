@@ -298,7 +298,7 @@
             }
           ],
           "yaxis": {
-            "format": "s",
+            "format": "s-skip-week",
             "logBase": 1,
             "decimals": 1
           }

@@ -142,6 +142,50 @@ export function toSeconds(size: number, decimals?: DecimalCount, scaledDecimals?
   return toFixedScaled(size / 3.15569e7, decimals, scaledDecimals, 7, ' year');
 }
 
+export function toSecondsSkipWeek(
+  size: number,
+  decimals?: DecimalCount,
+  scaledDecimals?: DecimalCount,
+) {
+  if (size === null) {
+    return '';
+  }
+
+  // Less than 1 µs, divide in ns
+  if (Math.abs(size) < 0.000001) {
+    return toFixedScaled(size * 1e9, decimals, trySubstract(scaledDecimals, decimals), -9, ' ns');
+  }
+  // Less than 1 ms, divide in µs
+  if (Math.abs(size) < 0.001) {
+    return toFixedScaled(size * 1e6, decimals, trySubstract(scaledDecimals, decimals), -6, ' µs');
+  }
+  // Less than 1 second, divide in ms
+  if (Math.abs(size) < 1) {
+    return toFixedScaled(size * 1e3, decimals, trySubstract(scaledDecimals, decimals), -3, ' ms');
+  }
+
+  if (Math.abs(size) < 60) {
+    return toFixed(size, decimals) + ' s';
+  } else if (Math.abs(size) < 3600) {
+    // Less than 1 hour, divide in minutes
+    return toFixedScaled(size / 60, decimals, scaledDecimals, 1, ' min');
+  } else if (Math.abs(size) < 86400) {
+    // Less than one day, divide in hours
+    return toFixedScaled(size / 3600, decimals, scaledDecimals, 4, ' hour');
+  } else if (Math.abs(size) < 604800) {
+    // Less than one week, divide in days
+    return toFixedScaled(size / 86400, decimals, scaledDecimals, 5, ' day');
+  } else if (Math.abs(size) < 31536000) {
+    // Less than one year, divide in week
+    // return toFixedScaled(size / 604800, decimals, scaledDecimals, 6, ' week');
+
+    // Less than one week, divide in days
+    return toFixedScaled(size / 86400, decimals, scaledDecimals, 5, ' day');
+  }
+
+  return toFixedScaled(size / 3.15569e7, decimals, scaledDecimals, 7, ' year');
+}
+
 export function toMinutes(size: number, decimals?: DecimalCount, scaledDecimals?: DecimalCount) {
   if (size === null) {
     return '';
