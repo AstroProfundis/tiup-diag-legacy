@@ -12,6 +12,7 @@ import (
 	multierror "github.com/hashicorp/go-multierror"
 	"github.com/pingcap/tidb-foresight/model"
 	"github.com/pingcap/tidb-foresight/utils"
+	"github.com/pingcap/tiup/pkg/cluster/spec"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -19,7 +20,7 @@ type Options interface {
 	GetHome() string
 	GetModel() model.Model
 	GetInspectionId() string
-	GetTopology() (*model.Topology, error)
+	GetTopology() (*spec.Specification, error)
 }
 
 type BasicCollector struct {
@@ -44,31 +45,31 @@ func (b *BasicCollector) Collect() error {
 	var errMutex sync.Mutex
 	var wg sync.WaitGroup
 
-	for _, host := range topo.Hosts {
-		ports := make([]string, 0)
-		for _, comp := range host.Components {
-			ports = append(ports, comp.Port)
-		}
-		wg.Add(1)
-		go func(currentHostIp string, currentPorts []string) {
-			defer wg.Done()
-			// collect insight on remote machine.
-			if e := b.insight(user.Username, currentHostIp, ports); e != nil {
-				errMutex.Lock()
-				defer errMutex.Unlock()
-				if err == nil {
-					err = multierror.Append(err, e)
+	uniqueHosts := map[string]int{}
+	topo.IterInstance(func(instance spec.Instance) {
+		if _, found := uniqueHosts[instance.GetHost()]; !found {
+			ports := instance.UsedPorts()
+			wg.Add(1)
+			go func(currentHostIp string, currentPorts []int) {
+				defer wg.Done()
+				// collect insight on remote machine.
+				if e := b.insight(user.Username, currentHostIp, ports); e != nil {
+					errMutex.Lock()
+					defer errMutex.Unlock()
+					if err == nil {
+						err = multierror.Append(err, e)
+					}
 				}
-			}
-		}(host.Ip, ports)
-	}
+			}(instance.GetHost(), ports)
+		}
+	})
 	// Note: this method thinks it will not blocked forever
 	wg.Wait()
 
 	return err
 }
 
-func (b *BasicCollector) insight(user, ip string, ports []string) error {
+func (b *BasicCollector) insight(user, ip string, ports []int) error {
 	b.GetModel().UpdateInspectionMessage(b.GetInspectionId(), fmt.Sprintf("collecting insight info for host %s...", ip))
 
 	p := path.Join(b.GetHome(), "inspection", b.GetInspectionId(), "insight", ip)
@@ -101,7 +102,7 @@ func (b *BasicCollector) insight(user, ip string, ports []string) error {
 	execute := exec.Command(
 		"ssh",
 		fmt.Sprintf("%s@%s", user, ip),
-		fmt.Sprintf("sudo chmod 755 /tmp/insight && sudo /tmp/insight --port %s", strings.Join(ports, ",")),
+		fmt.Sprintf("sudo chmod 755 /tmp/insight && sudo /tmp/insight --port %s", strings.Trim(strings.ReplaceAll(fmt.Sprint(ports), " ", ","), "[]")),
 	)
 	execute.Stdout = f
 	execute.Stderr = os.Stderr

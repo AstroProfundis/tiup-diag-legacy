@@ -8,6 +8,7 @@ import (
 	"path"
 
 	"github.com/pingcap/tidb-foresight/model"
+	"github.com/pingcap/tiup/pkg/cluster/spec"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -15,7 +16,7 @@ type Options interface {
 	GetHome() string
 	GetModel() model.Model
 	GetInspectionId() string
-	GetTopology() (*model.Topology, error)
+	GetTopology() (*spec.Specification, error)
 }
 
 type ConfigCollector struct {
@@ -37,27 +38,32 @@ func (c *ConfigCollector) Collect() error {
 		return err
 	}
 
-	for _, host := range topo.Hosts {
-		for _, comp := range host.Components {
-			if e := c.config(user.Username, host.Ip, comp.Port, comp.Name, comp.DeployDir); e != nil {
+	uniqueHosts := map[string]int{}
+	topo.IterInstance(func(instance spec.Instance) {
+		if _, found := uniqueHosts[instance.GetHost()]; !found {
+			if e := c.config(
+				user.Username,
+				instance.GetHost(),
+				instance.GetPort(),
+				instance.ComponentName(),
+				instance.DeployDir()); e != nil {
 				if err == nil {
 					err = e
 				}
 			}
 		}
-
-	}
+	})
 
 	return err
 }
 
-func (c *ConfigCollector) config(user, ip, port, comp, depdir string) error {
-	c.GetModel().UpdateInspectionMessage(c.GetInspectionId(), fmt.Sprintf("collecting config for %s(%s:%s)...", comp, ip, port))
+func (c *ConfigCollector) config(user, ip string, port int, comp, depdir string) error {
+	c.GetModel().UpdateInspectionMessage(c.GetInspectionId(), fmt.Sprintf("collecting config for %s(%s:%d)...", comp, ip, port))
 
 	if comp != "tidb" && comp != "pd" && comp != "tikv" {
 		return nil
 	}
-	p := path.Join(c.GetHome(), "inspection", c.GetInspectionId(), "config", comp, ip+":"+port)
+	p := path.Join(c.GetHome(), "inspection", c.GetInspectionId(), "config", comp, fmt.Sprintf("%s:%d", ip, port))
 	if err := os.MkdirAll(p, os.ModePerm); err != nil {
 		return err
 	}

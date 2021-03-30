@@ -8,6 +8,7 @@ import (
 	"path"
 
 	"github.com/pingcap/tidb-foresight/model"
+	"github.com/pingcap/tiup/pkg/cluster/spec"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -15,7 +16,7 @@ type Options interface {
 	GetHome() string
 	GetModel() model.Model
 	GetInspectionId() string
-	GetTopology() (*model.Topology, error)
+	GetTopology() (*spec.Specification, error)
 }
 
 type DmesgCollector struct {
@@ -37,13 +38,17 @@ func (c *DmesgCollector) Collect() error {
 		return err
 	}
 
-	for _, host := range topo.Hosts {
-		if e := c.dmesg(user.Username, host.Ip); e != nil {
-			if err == nil {
-				err = e
+	uniqueHosts := map[string]int{}
+	topo.IterInstance(func(instance spec.Instance) {
+		if _, found := uniqueHosts[instance.GetHost()]; !found {
+			uniqueHosts[instance.GetHost()] = instance.GetSSHPort()
+			if e := c.dmesg(user.Username, instance.GetHost()); e != nil {
+				if err == nil {
+					err = e
+				}
 			}
 		}
-	}
+	})
 
 	return err
 }

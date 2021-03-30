@@ -45,22 +45,7 @@ LDFLAGS += -X "github.com/pingcap/tidb-foresight/version.GitBranch=$(shell git r
 
 CHECK_LDFLAGS += $(LDFLAGS)
 
-INFLUXDB = influxd
-PROMETHEUS = prometheus
-PERL_SCRIPTS := flamegraph.pl fold-tikv-threads-perf.pl stackcollapse-perf.pl
-NEEDS_INSTALL = $(INFLUXDB) $(PROMETHEUS) $(PERL_SCRIPTS)
-
 DOWNLOAD_PREFIX = http://fileserver.pingcap.net/download/foresight/
-
-ifeq ($(foresight_port),)
-foresight_port=9527
-endif
-ifeq ($(influxd_port),)
-influxd_port=9528
-endif
-ifeq ($(prometheus_port),)
-prometheus_port=9529
-endif
 
 # set the default user tidb
 ifeq ($(user), )
@@ -68,6 +53,9 @@ user=tidb
 endif
 
 all: collector spliter syncer
+
+clean:
+	@rm -rf bin
 
 build:
 	$(GOBUILD)

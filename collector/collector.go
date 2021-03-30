@@ -19,9 +19,11 @@ import (
 	logc "github.com/pingcap/tidb-foresight/collector/log"
 	"github.com/pingcap/tidb-foresight/collector/metric"
 	"github.com/pingcap/tidb-foresight/collector/network"
-	"github.com/pingcap/tidb-foresight/collector/profile"
 	"github.com/pingcap/tidb-foresight/model"
 	"github.com/pingcap/tidb-foresight/wrapper/db"
+	"github.com/pingcap/tiup/pkg/base52"
+	"github.com/pingcap/tiup/pkg/cluster/spec"
+	"github.com/pingcap/tiup/pkg/utils/rand"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -30,30 +32,35 @@ type Collector interface {
 }
 
 type Options interface {
-	GetInstanceId() string
-	GetInspectionId() string
 	GetHome() string
-	GetItems() []string
+	GetInspectionId() string
 	GetScrapeBegin() (time.Time, error)
 	GetScrapeEnd() (time.Time, error)
-	GetComponents() []string
 }
 
 type Manager struct {
 	Options
+	clusterName  string
+	inspectionID string
 }
 
 func New(opts Options) Collector {
-	return &Manager{opts}
+	return &Manager{
+		Options:      opts,
+		inspectionID: base52.Encode(time.Now().UnixNano() + rand.Int63n(1000)),
+	}
+}
+
+func (m *Manager) GetInspectionId() string {
+	return m.inspectionID
 }
 
 func (m *Manager) Collect() error {
 	home := m.GetHome()
-	inspection := m.GetInspectionId()
 	start := time.Now()
 
 	// mkdir for collection results.
-	if err := os.MkdirAll(path.Join(home, "inspection", inspection), os.ModePerm); err != nil {
+	if err := os.MkdirAll(path.Join(home, "inspection", m.GetInspectionId()), os.ModePerm); err != nil {
 		return err
 	}
 
@@ -77,7 +84,7 @@ func (m *Manager) Collect() error {
 	} else {
 		log.Infof(
 			"Inspection %s collect with config: %s; and start from %s, ending in %s. Using time %s",
-			inspection, string(cfg), start.String(), end.String(), end.Sub(start).String(),
+			m.GetInspectionId(), string(cfg), start.String(), end.String(), end.Sub(start).String(),
 		)
 
 	}
@@ -89,18 +96,14 @@ func (m *Manager) Collect() error {
 // It move the topology file from topology/{instance_id}.json to inspection/{topology}.json
 func (m *Manager) collectTopology() error {
 	home := m.GetHome()
-	instance := m.GetInstanceId()
-	inspection := m.GetInspectionId()
 
-	m.GetModel().UpdateInspectionMessage(inspection, "collecting topology...")
-
-	src, err := os.Open(path.Join(home, "topology", instance+".json"))
+	src, err := os.Open(path.Join(home, "topology", ".json"))
 	if err != nil {
 		return err
 	}
 	defer src.Close()
 
-	dst, err := os.Create(path.Join(home, "inspection", inspection, "topology.json"))
+	dst, err := os.Create(path.Join(home, "inspection", m.GetInspectionId(), "topology.json"))
 	if err != nil {
 		return err
 	}
@@ -114,24 +117,18 @@ func (m *Manager) collectTopology() error {
 // It generate an args.json by it's opts.
 func (m *Manager) collectArgs() error {
 	home := m.GetHome()
-	inspection := m.GetInspectionId()
-
-	m.GetModel().UpdateInspectionMessage(inspection, "collecting args...")
 
 	data, err := json.Marshal(m.Options)
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path.Join(home, "inspection", inspection, "args.json"), data, os.ModePerm)
+	return os.WriteFile(path.Join(home, "inspection", m.GetInspectionId(), "args.json"), data, os.ModePerm)
 }
 
 // collectArgs runs in local machine.
 // It generate an args.json by it's environment variables.
 func (m *Manager) collectEnv() error {
 	home := m.GetHome()
-	inspection := m.GetInspectionId()
-
-	m.GetModel().UpdateInspectionMessage(inspection, "collecting env...")
 
 	env := make(map[string]string)
 	for _, e := range os.Environ() {
@@ -143,14 +140,11 @@ func (m *Manager) collectEnv() error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path.Join(home, "inspection", inspection, "env.json"), data, os.ModePerm)
+	return os.WriteFile(path.Join(home, "inspection", m.GetInspectionId(), "env.json"), data, os.ModePerm)
 }
 
 func (m *Manager) collectMeta(start, end time.Time) error {
 	home := m.GetHome()
-	inspection := m.GetInspectionId()
-
-	m.GetModel().UpdateInspectionMessage(inspection, "collecting meta...")
 
 	dict := map[string]time.Time{
 		"create_time":  start,
@@ -161,7 +155,7 @@ func (m *Manager) collectMeta(start, end time.Time) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path.Join(home, "inspection", inspection, "meta.json"), data, os.ModePerm)
+	return os.WriteFile(path.Join(home, "inspection", m.GetInspectionId(), "meta.json"), data, os.ModePerm)
 }
 
 func (m *Manager) collectRemote() error {
@@ -171,38 +165,24 @@ func (m *Manager) collectRemote() error {
 	status := make(map[string]error)
 
 	// build arrays for collector.
-	toCollectMap := make(map[string]Collector, 0)
+	toCollectMap := make(map[string]Collector)
 
-	for _, item := range m.GetItems() {
-		switch item {
-		case "alert":
-			toCollectMap[item] = alert.New(m)
-		case "dmesg":
-			toCollectMap[item] = dmesg.New(m)
-		case "basic":
-			toCollectMap[item] = basic.New(m)
-		case "config":
-			toCollectMap[item] = config.New(m)
-		case "dbinfo":
-			toCollectMap[item] = dbinfo.New(m)
-		case "log":
-			toCollectMap[item] = logc.New(m)
-		case "metric":
-			toCollectMap[item] = metric.New(m)
-		case "profile":
-			toCollectMap[item] = profile.New(m)
-		case "network":
-			toCollectMap[item] = network.New(m)
-		}
-	}
+	toCollectMap["alert"] = alert.New(m)
+	toCollectMap["dmesg"] = dmesg.New(m)
+	toCollectMap["basic"] = basic.New(m)
+	toCollectMap["config"] = config.New(m)
+	toCollectMap["dbinfo"] = dbinfo.New(m)
+	toCollectMap["logc"] = logc.New(m)
+	toCollectMap["metric"] = metric.New(m)
+	//toCollectMap["profile"] = profile.New(m)
+	toCollectMap["network"] = network.New(m)
 
-	inspId := m.GetInspectionId()
 	for item, collector := range toCollectMap {
 		wg.Add(1)
 		go func(innerCollector Collector, key string) {
 			defer wg.Done()
 			collected := innerCollector.Collect()
-			log.Info(fmt.Sprintf("[Collector] Inspection %s collect %s done.", inspId, item))
+			log.Info(fmt.Sprintf("[Collector] Inspection collect %s done.", key))
 			statusMutex.Lock()
 			defer statusMutex.Unlock()
 			status[key] = collected
@@ -215,9 +195,6 @@ func (m *Manager) collectRemote() error {
 
 func (m *Manager) collectStatus(status map[string]error) error {
 	home := m.GetHome()
-	inspection := m.GetInspectionId()
-
-	m.GetModel().UpdateInspectionMessage(inspection, "collecting status...")
 
 	dict := make(map[string]map[string]string)
 	for item, err := range status {
@@ -237,27 +214,16 @@ func (m *Manager) collectStatus(status map[string]error) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path.Join(home, "inspection", inspection, "status.json"), data, os.ModePerm)
+	return os.WriteFile(path.Join(home, "inspection", m.GetInspectionId(), "status.json"), data, os.ModePerm)
 }
 
-func (m *Manager) GetTopology() (*model.Topology, error) {
-	home := m.GetHome()
-	instanceId := m.GetInstanceId()
-
-	topo := model.Topology{}
-
-	content, err := os.ReadFile(path.Join(home, "topology", instanceId+".json"))
+func (m *Manager) GetTopology() (*spec.Specification, error) {
+	metadata, err := spec.ClusterMetadata(m.clusterName)
 	if err != nil {
-		log.Error("read file:", err)
 		return nil, err
 	}
 
-	if err = json.Unmarshal(content, &topo); err != nil {
-		log.Error("unmarshal:", err)
-		return nil, err
-	}
-
-	return &topo, nil
+	return metadata.Topology, nil
 }
 
 func (m *Manager) GetPrometheusEndpoint() (string, error) {
@@ -266,12 +232,8 @@ func (m *Manager) GetPrometheusEndpoint() (string, error) {
 		return "", err
 	}
 
-	for _, host := range topo.Hosts {
-		for _, comp := range host.Components {
-			if comp.Name == "prometheus" {
-				return host.Ip + ":" + comp.Port, nil
-			}
-		}
+	for _, host := range topo.Monitors {
+		return fmt.Sprintf("%s:%d", host.Host, host.Port), nil
 	}
 
 	return "", errors.New("component prometheus not found")
@@ -285,12 +247,8 @@ func (m *Manager) GetTidbStatusEndpoints() ([]string, error) {
 		return endpoints, err
 	}
 
-	for _, host := range topo.Hosts {
-		for _, comp := range host.Components {
-			if comp.Name == "tidb" {
-				endpoints = append(endpoints, host.Ip+":"+comp.StatusPort)
-			}
-		}
+	for _, host := range topo.TiDBServers {
+		endpoints = append(endpoints, fmt.Sprintf("%s:%d", host.Host, host.StatusPort))
 	}
 
 	return endpoints, nil

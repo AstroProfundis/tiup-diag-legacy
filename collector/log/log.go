@@ -14,7 +14,6 @@ import (
 type Options interface {
 	GetHome() string
 	GetModel() model.Model
-	GetInstanceId() string
 	GetInspectionId() string
 	GetScrapeBegin() (time.Time, error)
 	GetScrapeEnd() (time.Time, error)
@@ -39,14 +38,13 @@ func (c *LogCollector) Collect() error {
 	}
 
 	home := c.GetHome()
-	instance := c.GetInstanceId()
 	inspection := c.GetInspectionId()
 
 	c.GetModel().UpdateInspectionMessage(inspection, "collecting log...")
 
 	cmd := exec.Command(
 		path.Join(home, "bin", "spliter"),
-		fmt.Sprintf("--src=%s", path.Join(home, "remote-log", instance)),
+		//fmt.Sprintf("--src=%s", path.Join(home, "remote-log", instance)),
 		fmt.Sprintf("--dst=%s", path.Join(home, "inspection", inspection, "log")),
 		fmt.Sprintf("--begin=%s", begin.Format(time.RFC3339)),
 		fmt.Sprintf("--end=%s", end.Format(time.RFC3339)),
