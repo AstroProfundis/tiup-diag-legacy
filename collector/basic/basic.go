@@ -20,7 +20,7 @@ type Options interface {
 	GetHome() string
 	GetModel() model.Model
 	GetInspectionId() string
-	GetTopology() (*spec.Specification, error)
+	GetTopology() *spec.Specification
 }
 
 type BasicCollector struct {
@@ -37,10 +37,7 @@ func (b *BasicCollector) Collect() error {
 		return err
 	}
 
-	topo, err := b.GetTopology()
-	if err != nil {
-		return err
-	}
+	topo := b.GetTopology()
 	// mutex for err
 	var errMutex sync.Mutex
 	var wg sync.WaitGroup

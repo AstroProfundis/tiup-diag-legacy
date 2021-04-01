@@ -16,7 +16,7 @@ type Options interface {
 	GetHome() string
 	GetModel() model.Model
 	GetInspectionId() string
-	GetTopology() (*spec.Specification, error)
+	GetTopology() *spec.Specification
 }
 
 type NetworkCollector struct {
@@ -33,10 +33,7 @@ func (c *NetworkCollector) Collect() error {
 		return err
 	}
 
-	topo, err := c.GetTopology()
-	if err != nil {
-		return err
-	}
+	topo := c.GetTopology()
 
 	uniqueHosts := map[string]int{}
 	topo.IterInstance(func(instance spec.Instance) {

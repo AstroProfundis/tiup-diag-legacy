@@ -4,10 +4,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path"
-	"strings"
 	"sync"
 	"time"
 
@@ -22,6 +20,7 @@ import (
 	"github.com/pingcap/tidb-foresight/model"
 	"github.com/pingcap/tidb-foresight/wrapper/db"
 	"github.com/pingcap/tiup/pkg/base52"
+	"github.com/pingcap/tiup/pkg/cliutil"
 	"github.com/pingcap/tiup/pkg/cluster/spec"
 	"github.com/pingcap/tiup/pkg/utils/rand"
 	log "github.com/sirupsen/logrus"
@@ -34,25 +33,75 @@ type Collector interface {
 type Options interface {
 	GetHome() string
 	GetInspectionId() string
+	GetClusterName() string
 	GetScrapeBegin() (time.Time, error)
 	GetScrapeEnd() (time.Time, error)
+	GetUser() string
+	GetPasswd() string
+	GetIdentityFile() string
 }
 
 type Manager struct {
 	Options
 	clusterName  string
 	inspectionID string
+	meta         spec.Metadata
+	tidbSpec     *spec.SpecManager
+	sshUser      string
+	sshConnProps *cliutil.SSHConnectionProps
 }
 
-func New(opts Options) Collector {
-	return &Manager{
-		Options:      opts,
-		inspectionID: base52.Encode(time.Now().UnixNano() + rand.Int63n(1000)),
+func New(opts Options) (Collector, error) {
+	m := &Manager{
+		Options: opts,
 	}
+	if opts.GetInspectionId() != "" {
+		m.inspectionID = opts.GetInspectionId()
+	} else {
+		m.inspectionID = base52.Encode(time.Now().UnixNano() + rand.Int63n(1000))
+	}
+	m.tidbSpec = spec.GetSpecManager()
+
+	clusterName := m.GetClusterName()
+	exist, err := m.tidbSpec.Exist(clusterName)
+	if err != nil {
+		return nil, err
+	}
+	if !exist {
+		return nil, fmt.Errorf("cluster %s does not exist", clusterName)
+	}
+
+	m.meta, err = spec.ClusterMetadata(clusterName)
+	if err != nil {
+		return nil, err
+	}
+
+	identifyFile := opts.GetIdentityFile()
+	if m.sshConnProps, err = cliutil.ReadIdentityFileOrPassword(identifyFile, identifyFile != ""); err != nil {
+		return nil, err
+	}
+
+	return m, nil
 }
 
 func (m *Manager) GetInspectionId() string {
 	return m.inspectionID
+}
+
+func (m *Manager) GetClusterName() string {
+	return m.clusterName
+}
+
+func (m *Manager) GetUser() string {
+	return m.sshUser
+}
+
+func (m *Manager) GetPasswd() string {
+	return m.sshConnProps.Password
+}
+
+func (m *Manager) GetIdentityFile() string {
+	return m.sshConnProps.IdentityFile
 }
 
 func (m *Manager) Collect() error {
@@ -65,12 +114,6 @@ func (m *Manager) Collect() error {
 	}
 
 	if err := m.collectTopology(); err != nil {
-		return err
-	}
-	if err := m.collectArgs(); err != nil {
-		return err
-	}
-	if err := m.collectEnv(); err != nil {
 		return err
 	}
 	if err := m.collectRemote(); err != nil {
@@ -97,50 +140,19 @@ func (m *Manager) Collect() error {
 func (m *Manager) collectTopology() error {
 	home := m.GetHome()
 
-	src, err := os.Open(path.Join(home, "topology", ".json"))
+	data, err := json.Marshal(m.meta)
 	if err != nil {
 		return err
 	}
-	defer src.Close()
 
 	dst, err := os.Create(path.Join(home, "inspection", m.GetInspectionId(), "topology.json"))
 	if err != nil {
 		return err
 	}
 	defer dst.Close()
+	dst.Write(data)
 
-	_, err = io.Copy(dst, src)
 	return err
-}
-
-// collectArgs runs in local machine.
-// It generate an args.json by it's opts.
-func (m *Manager) collectArgs() error {
-	home := m.GetHome()
-
-	data, err := json.Marshal(m.Options)
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(path.Join(home, "inspection", m.GetInspectionId(), "args.json"), data, os.ModePerm)
-}
-
-// collectArgs runs in local machine.
-// It generate an args.json by it's environment variables.
-func (m *Manager) collectEnv() error {
-	home := m.GetHome()
-
-	env := make(map[string]string)
-	for _, e := range os.Environ() {
-		pair := strings.Split(e, "=")
-		env[pair[0]] = os.Getenv(pair[0])
-	}
-
-	data, err := json.Marshal(env)
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(path.Join(home, "inspection", m.GetInspectionId(), "env.json"), data, os.ModePerm)
 }
 
 func (m *Manager) collectMeta(start, end time.Time) error {
@@ -217,20 +229,12 @@ func (m *Manager) collectStatus(status map[string]error) error {
 	return os.WriteFile(path.Join(home, "inspection", m.GetInspectionId(), "status.json"), data, os.ModePerm)
 }
 
-func (m *Manager) GetTopology() (*spec.Specification, error) {
-	metadata, err := spec.ClusterMetadata(m.clusterName)
-	if err != nil {
-		return nil, err
-	}
-
-	return metadata.Topology, nil
+func (m *Manager) GetTopology() *spec.Specification {
+	return m.meta.GetTopology().(*spec.Specification)
 }
 
 func (m *Manager) GetPrometheusEndpoint() (string, error) {
-	topo, err := m.GetTopology()
-	if err != nil {
-		return "", err
-	}
+	topo := m.GetTopology()
 
 	for _, host := range topo.Monitors {
 		return fmt.Sprintf("%s:%d", host.Host, host.Port), nil
@@ -242,10 +246,7 @@ func (m *Manager) GetPrometheusEndpoint() (string, error) {
 func (m *Manager) GetTidbStatusEndpoints() ([]string, error) {
 	endpoints := []string{}
 
-	topo, err := m.GetTopology()
-	if err != nil {
-		return endpoints, err
-	}
+	topo := m.GetTopology()
 
 	for _, host := range topo.TiDBServers {
 		endpoints = append(endpoints, fmt.Sprintf("%s:%d", host.Host, host.StatusPort))

@@ -1,14 +1,17 @@
 package dmesg
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
-	"os/user"
 	"path"
 
 	"github.com/pingcap/tidb-foresight/model"
+	"github.com/pingcap/tiup/pkg/cluster/ctxt"
+	"github.com/pingcap/tiup/pkg/cluster/executor"
 	"github.com/pingcap/tiup/pkg/cluster/spec"
+	"github.com/pingcap/tiup/pkg/cluster/task"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -16,7 +19,10 @@ type Options interface {
 	GetHome() string
 	GetModel() model.Model
 	GetInspectionId() string
-	GetTopology() (*spec.Specification, error)
+	GetTopology() *spec.Specification
+	GetUser() string
+	GetPasswd() string
+	GetIdentityFile() string
 }
 
 type DmesgCollector struct {
@@ -28,29 +34,44 @@ func New(opts Options) *DmesgCollector {
 }
 
 func (c *DmesgCollector) Collect() error {
-	user, err := user.Current()
-	if err != nil {
-		return err
-	}
-
-	topo, err := c.GetTopology()
-	if err != nil {
-		return err
-	}
+	topo := c.GetTopology()
+	var ctask []*task.StepDisplay
 
 	uniqueHosts := map[string]int{}
 	topo.IterInstance(func(instance spec.Instance) {
 		if _, found := uniqueHosts[instance.GetHost()]; !found {
 			uniqueHosts[instance.GetHost()] = instance.GetSSHPort()
-			if e := c.dmesg(user.Username, instance.GetHost()); e != nil {
-				if err == nil {
-					err = e
-				}
-			}
+			t := task.NewBuilder().
+				RootSSH(
+					instance.GetHost(),
+					instance.GetSSHPort(),
+					c.GetUser(),
+					c.GetPasswd(),
+					c.GetIdentityFile(),
+					"",
+					30,
+					executor.SSHTypeBuiltin,
+					executor.SSHTypeBuiltin,
+				).
+				Shell(
+					instance.GetHost(),
+					"dmesg",
+					"",
+					true,
+				)
+			ctask = append(ctask, t.BuildAsStep(fmt.Sprintf("collecting dmesg from %s", instance.GetHost())))
 		}
 	})
 
-	return err
+	t := task.NewBuilder().
+		ParallelStep("Collect kernel messages", false, ctask...).
+		Build()
+
+	ctx := ctxt.New(context.Background())
+	if err := t.Execute(ctx); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (c *DmesgCollector) dmesg(user, ip string) error {
